@@ -244,4 +244,205 @@ Eigen::Vector2d IntpcLocalPlanner::computeIntpcControl(
   return Eigen::Vector2d(linear_vel, angular_vel);
 }
 
+/**
+ * @brief 傅里叶路径拟合
+ * @param path_x 路径x坐标列表
+ * @param path_y 路径y坐标列表
+ * @param theta 角度参数列表
+ * @param harmonic 傅里叶级数的阶数
+ * @param px 输出：傅里叶系数x
+ * @param py 输出：傅里叶系数y
+ */
+void IntpcLocalPlanner::fourierFit(const std::vector<double>& path_x, const std::vector<double>& path_y,
+                                    const std::vector<double>& theta, int harmonic,
+                                    std::vector<double>& px, std::vector<double>& py) {
+  int number = path_x.size();
+  
+  // 构造G矩阵
+  Eigen::MatrixXd G = Eigen::MatrixXd::Zero(2 * number, 4 * harmonic);
+  for (int i = 0; i < 2 * number; i++) {
+    for (int j = 0; j < 4 * harmonic; j++) {
+      double theta_val = theta[i / 2];
+      if (i % 2 == 0) {
+        if (j % 4 == 0) {
+          G(i, j) = std::cos((j / 4 + 1) * theta_val);
+        } else if (j % 4 == 1) {
+          G(i, j) = std::sin((j / 4 + 1) * theta_val);
+        } else {
+          G(i, j) = 0.0;
+        }
+      } else {
+        if (j % 4 == 2) {
+          G(i, j) = std::cos((j / 4 + 1) * theta_val);
+        } else if (j % 4 == 3) {
+          G(i, j) = std::sin((j / 4 + 1) * theta_val);
+        } else {
+          G(i, j) = 0.0;
+        }
+      }
+    }
+  }
+  
+  // 构造I矩阵
+  Eigen::MatrixXd I = Eigen::MatrixXd::Zero(2 * number, 2);
+  for (int i = 0; i < number; i++) {
+    I(2 * i, 0) = 1.0;
+    I(2 * i + 1, 1) = 1.0;
+  }
+  
+  // 构造H矩阵
+  Eigen::MatrixXd H(2 * number, 4 * harmonic + 2);
+  H << G, I;
+  
+  // 构造L向量
+  Eigen::VectorXd L = Eigen::VectorXd::Zero(2 * number);
+  for (int i = 0; i < 2 * number; i++) {
+    if (i % 2 == 0) {
+      L(i) = path_x[i / 2];
+    } else {
+      L(i) = path_y[i / 2];
+    }
+  }
+  
+  // 求解最小二乘问题
+  Eigen::VectorXd parameter = (H.transpose() * H).inverse() * H.transpose() * L;
+  
+  // 分离px和py系数
+  px.clear();
+  py.clear();
+  for (int i = 0; i < parameter.size() - 2; i++) {
+    if ((i / 2) % 2 == 0) {
+      px.push_back(parameter(i));
+    } else {
+      py.push_back(parameter(i));
+    }
+  }
+  px.push_back(parameter(parameter.size() - 2));
+  py.push_back(parameter(parameter.size() - 1));
+}
+
+/**
+ * @brief 使用傅里叶系数计算路径点
+ * @param theta 角度参数
+ * @param px 傅里叶系数x
+ * @param py 傅里叶系数y
+ * @param x 输出：x坐标
+ * @param y 输出：y坐标
+ */
+void IntpcLocalPlanner::fourierPathPoint(double theta, const std::vector<double>& px,
+                                          const std::vector<double>& py, double& x, double& y) {
+  int harmonic = px.size() / 2;
+  
+  // 计算x坐标
+  x = px.back();
+  for (int i = 0; i < harmonic; i++) {
+    x += px[2 * i] * std::cos((i + 1) * theta) + px[2 * i + 1] * std::sin((i + 1) * theta);
+  }
+  
+  // 计算y坐标
+  y = py.back();
+  for (int i = 0; i < harmonic; i++) {
+    y += py[2 * i] * std::cos((i + 1) * theta) + py[2 * i + 1] * std::sin((i + 1) * theta);
+  }
+}
+
+/**
+ * @brief 求解QP优化问题，生成考虑障碍物的控制速度
+ * @param ud 期望控制输入
+ * @param x 当前x坐标
+ * @param y 当前y坐标
+ * @param theta 当前角度
+ * @param x_o 障碍物x坐标列表
+ * @param y_o 障碍物y坐标列表
+ * @param r_o 障碍物半径列表
+ * @param alpha 避障参数
+ * @param l 机器人参数
+ * @param d 机器人参数
+ * @param max_speed 最大速度限制
+ * @return 优化后的控制输入
+ */
+Eigen::Vector2d IntpcLocalPlanner::qp(const Eigen::Vector2d& ud, double x, double y, double theta,
+                                      const std::vector<double>& x_o, const std::vector<double>& y_o,
+                                      const std::vector<double>& r_o, double alpha, double l, double d,
+                                      double max_speed) {
+  // 构造R_bar矩阵
+  Eigen::Matrix2d R_bar;
+  R_bar(0, 0) = std::cos(theta);
+  R_bar(0, 1) = -l * std::sin(theta);
+  R_bar(1, 0) = std::sin(theta);
+  R_bar(1, 1) = l * std::cos(theta);
+  
+  double delta = 0.5;
+  
+  // 构造H矩阵（目标函数的二次项）
+  Eigen::Matrix2d H;
+  H(0, 0) = R_bar(0, 0) * R_bar(0, 0) + R_bar(1, 0) * R_bar(1, 0) + delta;
+  H(0, 1) = R_bar(0, 0) * R_bar(0, 1) + R_bar(1, 0) * R_bar(1, 1);
+  H(1, 0) = H(0, 1);
+  H(1, 1) = R_bar(0, 1) * R_bar(0, 1) + R_bar(1, 1) * R_bar(1, 1);
+  
+  // 构造f向量（目标函数的一次项）
+  Eigen::Vector2d f;
+  f(0) = -(ud(0) * R_bar(0, 0) + ud(1) * R_bar(1, 0) + delta * 0.02);
+  f(1) = -(ud(0) * R_bar(0, 1) + ud(1) * R_bar(1, 1));
+  
+  // 构造约束矩阵A和向量b
+  int num_constraints = x_o.size() + 1 + 4;
+  Eigen::MatrixXd A = Eigen::MatrixXd::Zero(num_constraints, 2);
+  Eigen::VectorXd b = Eigen::VectorXd::Zero(num_constraints);
+  
+  // 障碍物约束
+  for (size_t i = 0; i < x_o.size(); i++) {
+    A(i, 0) = -2.0 * (R_bar(0, 0) * (x - x_o[i]) + R_bar(1, 0) * (y - y_o[i]));
+    A(i, 1) = -2.0 * (R_bar(0, 1) * (x - x_o[i]) + R_bar(1, 1) * (y - y_o[i]));
+    double h = (x - x_o[i]) * (x - x_o[i]) + (y - y_o[i]) * (y - y_o[i]) - r_o[i] * r_o[i];
+    b(i) = alpha * h;
+  }
+  
+  // 速度约束
+  int idx = x_o.size();
+  A(idx, 0) = 1.0;
+  A(idx, 1) = d;
+  A(idx + 1, 0) = 1.0;
+  A(idx + 1, 1) = -d;
+  A(idx + 2, 0) = -1.0;
+  A(idx + 2, 1) = -d;
+  A(idx + 3, 0) = -1.0;
+  A(idx + 3, 1) = d;
+  
+  b(idx) = max_speed;
+  b(idx + 1) = max_speed;
+  b(idx + 2) = max_speed;
+  b(idx + 3) = max_speed;
+  
+  // 使用梯度投影法求解QP问题
+  Eigen::Vector2d u = ud;
+  
+  // 简化求解：直接使用投影梯度下降
+  double learning_rate = 0.01;
+  int max_iterations = 100;
+  
+  for (int iter = 0; iter < max_iterations; iter++) {
+    // 计算梯度
+    Eigen::Vector2d grad = H * u + f;
+    
+    // 梯度下降更新
+    u = u - learning_rate * grad;
+    
+    // 投影到约束区域
+    for (int i = 0; i < num_constraints; i++) {
+      double constraint_val = A.row(i) * u - b(i);
+      if (constraint_val > 0) {
+        // 违反约束，进行投影
+        double norm = A.row(i).squaredNorm();
+        if (norm > 1e-6) {
+          u = u - (constraint_val / norm) * A.row(i).transpose();
+        }
+      }
+    }
+  }
+  
+  return u;
+}
+
 }  // namespace intpc_local_planner

@@ -130,6 +130,49 @@ public:
                                      const std::vector<double>& obstacle_radii,
                                      double k_gain, double max_speed);
 
+  /**
+   * @brief 傅里叶路径拟合
+   * @param path_x 路径x坐标列表
+   * @param path_y 路径y坐标列表
+   * @param theta 角度参数列表
+   * @param harmonic 傅里叶级数的阶数
+   * @param px 输出：傅里叶系数x
+   * @param py 输出：傅里叶系数y
+   */
+  void fourierFit(const std::vector<double>& path_x, const std::vector<double>& path_y,
+                  const std::vector<double>& theta, int harmonic,
+                  std::vector<double>& px, std::vector<double>& py);
+
+  /**
+   * @brief 使用傅里叶系数计算路径点
+   * @param theta 角度参数
+   * @param px 傅里叶系数x
+   * @param py 傅里叶系数y
+   * @param x 输出：x坐标
+   * @param y 输出：y坐标
+   */
+  void fourierPathPoint(double theta, const std::vector<double>& px,
+                       const std::vector<double>& py, double& x, double& y);
+
+  /**
+   * @brief 计算参考向量（模仿vector.py的reference函数）
+   * @param k 比例增益
+   * @param x 当前x坐标
+   * @param y 当前y坐标
+   * @param px 傅里叶系数x
+   * @param py 傅里叶系数y
+   * @param vd 期望速度
+   * @param distance 距离偏移
+   * @param x_c 路径中心x坐标
+   * @param y_c 路径中心y坐标
+   * @param harmonic 傅里叶阶数
+   * @param e 输出：距离误差
+   * @param vf 输出：参考速度向量
+   */
+  void reference(double k, double x, double y, const std::vector<double>& px,
+                 const std::vector<double>& py, double vd, double distance,
+                 double x_c, double y_c, int harmonic, double& e, Eigen::Vector2d& vf);
+
 private:
   // 机器人参数
   double wheel_base_;  // 轴距

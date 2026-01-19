@@ -123,6 +123,7 @@ def generate_launch_description():
 
       # 定义参数文件路径
       intpc_params_file = os.path.join(rm_nav_bringup_dir, 'config', 'simulation', 'nav2_params_intpc.yaml')
+      intpc_global_dwb_local_params_file = os.path.join(rm_nav_bringup_dir, 'config', 'simulation', 'nav2_params_intpc_global_dwb_local.yaml')
       default_params_file = os.path.join(rm_nav_bringup_dir, 'config', 'simulation', 'nav2_params_sim.yaml')
 
       ################################ icp_registration parameters start ################################
@@ -172,8 +173,8 @@ def generate_launch_description():
           
       declare_planner_type_cmd = DeclareLaunchArgument(
           'planner_type',
-          default_value='intpc',
-          description='Choose local planner: teb or intpc')
+          default_value='intpc_global_dwb_local',
+          description='Choose planner: dwb, teb, intpc, intpc_global_dwb_local (default)')
 
 
 
@@ -301,7 +302,7 @@ def generate_launch_description():
               ])
       ])
       
-        # 创建两个不同的定位启动配置，根据planner_type选择不同的参数文件
+        # 创建三个不同的定位启动配置，根据planner_type选择不同的参数文件
       start_localization_group_intpc = GroupAction(
             condition = IfCondition(
                 PythonExpression(['"', LaunchConfiguration('mode'), '" == "nav" and "', LaunchConfiguration('planner_type'), '" == "intpc"'])
@@ -353,6 +354,61 @@ def generate_launch_description():
                     'use_sim_time': use_sim_time,
                     'map': nav2_map_dir,
                     'params_file': intpc_params_file,
+                    'container_name': 'nav2_container'}.items())
+            ]
+        )
+        
+      start_localization_group_intpc_global_dwb_local = GroupAction(
+            condition = IfCondition(
+                PythonExpression(['"', LaunchConfiguration('mode'), '" == "nav" and "', LaunchConfiguration('planner_type'), '" == "intpc_global_dwb_local"'])
+            ),
+            actions=[
+                Node(
+                    condition = LaunchConfigurationEquals('localization', 'slam_toolbox'),
+                    package='slam_toolbox',
+                    executable='localization_slam_toolbox_node',
+                    name='slam_toolbox',
+                    parameters=[
+                        slam_toolbox_localization_file_dir,
+                        {'use_sim_time': use_sim_time,
+                        'map_file_name': slam_toolbox_map_dir,
+                        'map_start_pose': [0.0, 0.0, 0.0]}
+                    ],
+                ),
+
+                IncludeLaunchDescription(
+                    PythonLaunchDescriptionSource(os.path.join(navigation2_launch_dir,'localization_amcl_launch.py')),
+                    condition = LaunchConfigurationEquals('localization', 'amcl'),
+                    launch_arguments={
+                        'use_sim_time': use_sim_time,
+                        'params_file': intpc_global_dwb_local_params_file}.items()
+                ),
+
+                TimerAction(
+                    period=7.0,
+                    actions=[
+                        Node(
+                            condition=LaunchConfigurationEquals('localization', 'icp'),
+                            package='icp_registration',
+                            executable='icp_registration_node',
+                            output='screen',
+                            parameters=[
+                                icp_registration_params_dir,
+                                {'use_sim_time': use_sim_time,
+                                    'pcd_path': icp_pcd_dir}
+                            ],
+                            # arguments=['--ros-args', '--log-level', ['icp_registration:=', 'DEBUG']]
+                        )
+                    ]
+                ),
+
+                IncludeLaunchDescription(
+                    PythonLaunchDescriptionSource(os.path.join(navigation2_launch_dir, 'map_server_launch.py')),
+                condition = LaunchConfigurationNotEquals('localization', 'slam_toolbox'),
+                launch_arguments={
+                    'use_sim_time': use_sim_time,
+                    'map': nav2_map_dir,
+                    'params_file': intpc_global_dwb_local_params_file,
                     'container_name': 'nav2_container'}.items())
             ]
         )
@@ -456,6 +512,17 @@ def generate_launch_description():
                 'planner_type': 'teb'}.items()
         )
 
+      start_navigation2_intpc_global_dwb_local = IncludeLaunchDescription(
+            PythonLaunchDescriptionSource(os.path.join(navigation2_launch_dir, 'bringup_rm_navigation.py')),
+            condition=LaunchConfigurationEquals('planner_type', 'intpc_global_dwb_local'),
+            launch_arguments={
+                'use_sim_time': use_sim_time,
+                'map': nav2_map_dir,
+                'params_file': os.path.join(rm_nav_bringup_dir, 'config', 'simulation', 'nav2_params_intpc_global_dwb_local.yaml'),
+                'nav_rviz': use_nav_rviz,
+                'planner_type': 'intpc_global_dwb_local'}.items()
+        )
+
       ld = LaunchDescription()
 
       # Declare the launch options
@@ -474,10 +541,12 @@ def generate_launch_description():
       ld.add_action(bringup_pointcloud_to_laserscan_node)
       ld.add_action(bringup_LIO_group)
       ld.add_action(start_localization_group_intpc)
+      ld.add_action(start_localization_group_intpc_global_dwb_local)
       ld.add_action(start_localization_group_teb)
       ld.add_action(bringup_fake_vel_transform_node)
       ld.add_action(start_mapping)
       ld.add_action(start_navigation2_intpc)
       ld.add_action(start_navigation2_teb)
+      ld.add_action(start_navigation2_intpc_global_dwb_local)
 
       return ld

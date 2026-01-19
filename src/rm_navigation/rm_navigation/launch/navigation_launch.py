@@ -39,7 +39,7 @@ def generate_launch_description():
     container_name_full = (namespace, '/', container_name)
     use_respawn = LaunchConfiguration('use_respawn')
     log_level = LaunchConfiguration('log_level')
-    planner_type = LaunchConfiguration('planner_type', default='teb')
+    planner_type = LaunchConfiguration('planner_type', default='intpc_global_dwb_local')
 
     lifecycle_nodes = ['controller_server',
                        'smoother_server',
@@ -112,8 +112,8 @@ def generate_launch_description():
         
     declare_planner_type_cmd = DeclareLaunchArgument(
         'planner_type', 
-        default_value='teb',
-        description='Planner type to use: teb or intpc')
+        default_value='intpc_global_dwb_local',
+        description='Planner type to use: dwb, teb, intpc, intpc_global_dwb_local (default)')
 
     load_nodes = GroupAction(
         condition=IfCondition(PythonExpression(['not ', use_composition])),

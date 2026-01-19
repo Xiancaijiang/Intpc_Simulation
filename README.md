@@ -63,13 +63,33 @@ c
 | `localization` | `slam_toolbox`/`amcl`/`icp` | 定位算法（仅`mode:=nav`有效） |
 | `lio_rviz` | `True`/`False` | 是否可视化LiDAR点云 |
 | `nav_rviz` | `True`/`False` | 是否可视化导航信息 |
-| `planner_type` | `teb`/`intpc` | 局部规划器选择<br>`teb`：Timed Elastic Band算法<br>`intpc`：自主研发的集成规划与控制算法 |
+| `planner_type` | `dwb`/`teb`/`intpc`/`intpc_global_dwb_local` | 规划器配置选择<br>`dwb`：全局NavfnPlanner + 局部DWB<br>`teb`：全局NavfnPlanner + 局部TEB<br>`intpc`：全局NavfnPlanner + 局部Intpc<br>`intpc_global_dwb_local`：全局Intpc + 局部DWB（默认） |
 
 ### 定位算法说明
 
 - **slam_toolbox**：动态场景下定位效果好，支持回环检测
 - **amcl**：经典概率定位算法，启动需手动给定初始位姿
 - **icp**：基于点云配准的定位，仅初始定位时使用，长时间运行可能有累积误差
+
+### 规划器配置说明
+
+本项目支持四种规划器配置，每种配置使用不同的全局和局部规划器组合：
+
+| 配置类型 | 全局规划器 | 局部规划器 | 特点 |
+|---------|-----------|-----------|------|
+| `dwb` | NavfnPlanner | DWB | 基于Dijkstra算法的全局规划 + 动态窗口法的局部规划 |
+| `teb` | NavfnPlanner | TEB | 基于Dijkstra算法的全局规划 + 时间弹性带算法的局部规划，适合复杂环境动态避障 |
+| `intpc` | NavfnPlanner | Intpc | 基于Dijkstra算法的全局规划 + 自主研发的集成规划与控制算法的局部规划 |
+| `intpc_global_dwb_local` | Intpc | DWB | 默认配置，使用Intpc作为全局规划器（基于傅里叶路径表示和优化算法）+ DWB作为局部规划器 |
+
+**全局规划器说明**：
+- **NavfnPlanner**：Navigation2默认的全局规划器，基于Dijkstra算法，快速生成从起点到目标点的全局路径
+- **Intpc全局规划器**：自主研发的全局规划器，使用傅里叶路径表示和优化算法，生成更平滑的全局路径
+
+**局部规划器说明**：
+- **DWB**：Navigation2默认的局部规划器，基于动态窗口法，在全局路径附近生成满足运动学约束的局部轨迹
+- **TEB**：时间弹性带算法，通过优化时间参数化的路径来生成平滑的轨迹，适合复杂环境下的动态避障
+- **Intpc**：自主研发的集成规划与控制算法，使用控制障碍函数（CBF）和二次规划优化，实现更精确的轨迹跟踪
 
 ### 3.2 仿真模式示例
     ```sh
@@ -79,9 +99,9 @@ c
 ```sh
 ros2 launch rm_nav_bringup bringup_sim.launch.py \
 world:=RMUL \
-mode:=mapping \
+mode:=mapping \  
 lio:=fastlio \
-planner_type:=intpc \
+planner_type:=dwb \
 lio_rviz:=False \
 nav_rviz:=True
 ```
@@ -93,7 +113,19 @@ world:=RMUL \
 mode:=nav \
 lio:=fastlio \
 localization:=slam_toolbox \
-planner_type:=intpc \
+planner_type:=dwb \
+lio_rviz:=False \
+nav_rviz:=True
+```
+
+#### 使用Intpc全局规划器 + DWB局部规划器导航
+```sh
+ros2 launch rm_nav_bringup bringup_sim.launch.py \
+world:=RMUL \
+mode:=nav \
+lio:=fastlio \
+localization:=slam_toolbox \
+planner_type:=intpc_global_dwb_local \
 lio_rviz:=False \
 nav_rviz:=True
 ```
@@ -106,7 +138,7 @@ ros2 launch rm_nav_bringup bringup_real.launch.py \
 world:=YOUR_WORLD_NAME \
 mode:=mapping  \
 lio:=fastlio \
-planner_type:=teb \
+planner_type:=dwb \
 lio_rviz:=False \
 nav_rviz:=True
 ```
@@ -125,7 +157,7 @@ world:=YOUR_WORLD_NAME \
 mode:=nav \
 lio:=fastlio \
 localization:=slam_toolbox \
-planner_type:=teb \
+planner_type:=dwb \
 lio_rviz:=False \
 nav_rviz:=True
 ```
@@ -237,7 +269,261 @@ ros2 launch rm_nav_bringup bringup_sim.launch.py planner_type:=<your_planner_nam
 └── LICENSE                # 许可证
 ```
 
-## 七. 致谢与参考
+## 八. 自检机制
+
+### 8.1 全局规划器自检
+
+#### 接口实现验证
+
+**检查点1：插件注册**
+```bash
+# 查看插件注册文件
+cat src/rm_navigation/Intpc_local_planner/intpc_local_planner_plugin.xml
+```
+
+预期输出应包含：
+```xml
+<class type="intpc_local_planner::IntpcGlobalPlannerROS" base_class_type="nav2_core::GlobalPlanner">
+  <description>Intpc Global Planner implements path planning functionality with Fourier path representation.</description>
+</class>
+```
+
+**检查点2：头文件接口**
+```bash
+# 检查头文件是否正确继承nav2_core::GlobalPlanner
+grep -n "class IntpcGlobalPlannerROS" src/rm_navigation/Intpc_local_planner/include/intpc_local_planner/intpc_global_planner_ros.h
+```
+
+预期输出：
+```cpp
+class IntpcGlobalPlannerROS : public nav2_core::GlobalPlanner
+```
+
+**检查点3：必需方法实现**
+```bash
+# 检查是否实现了所有必需的接口方法
+grep -E "(configure|cleanup|activate|deactivate|createPlan)" src/rm_navigation/Intpc_local_planner/include/intpc_local_planner/intpc_global_planner_ros.h
+```
+
+预期应包含所有五个方法。
+
+#### 配置验证
+
+**检查点4：配置文件设置**
+```bash
+# 查看全局规划器配置
+cat src/rm_navigation/rm_navigation/params/nav2_params_intpc_global_dwb_local.yaml | grep -A 10 "planner_server:"
+```
+
+预期输出应包含：
+```yaml
+planner_server:
+  ros__parameters:
+    planner_plugins: ["GridBased"]
+    GridBased:
+      plugin: "intpc_local_planner/IntpcGlobalPlannerROS"
+```
+
+#### 编译验证
+
+**检查点5：编译成功**
+```bash
+colcon build --packages-select Intpc_local_planner --symlink-install
+```
+
+预期输出：编译成功，无错误。
+
+#### 运行时验证
+
+**检查点6：插件加载**
+```bash
+# 启动导航系统
+ros2 launch rm_nav_bringup bringup_sim.launch.py planner_type:=intpc_global_dwb_local
+
+# 在另一个终端检查插件是否正确加载
+ros2 param get /planner_server GridBased/plugin
+```
+
+预期输出：`intpc_local_planner/IntpcGlobalPlannerROS`
+
+**检查点7：路径规划功能**
+```bash
+# 发送导航目标
+ros2 action send_goal /navigate_to_pose nav2_msgs/action/NavigateToPose "{pose: {header: {frame_id: 'map'}, pose: {position: {x: 2.0, y: 1.0}, orientation: {w: 1.0}}}}"
+
+# 查看规划结果
+ros2 topic echo /plan
+```
+
+预期输出：应生成有效的全局路径。
+
+### 8.2 局部规划器自检
+
+#### 接口实现验证
+
+**检查点1：插件注册**
+```bash
+# 查看插件注册文件
+cat src/rm_navigation/Intpc_local_planner/intpc_local_planner_plugin.xml
+```
+
+预期输出应包含：
+```xml
+<class type="intpc_local_planner::IntpcLocalPlannerROS" base_class_type="nav2_core::Controller">
+  <description>Intpc Local Planner implements Fourier path representation, proportional-tangential-normal control, CBF, and quadratic programming optimization.</description>
+</class>
+```
+
+**检查点2：头文件接口**
+```bash
+# 检查头文件是否正确继承nav2_core::Controller
+grep -n "class IntpcLocalPlannerROS" src/rm_navigation/Intpc_local_planner/include/intpc_local_planner/intpc_local_planner_ros.h
+```
+
+预期输出：
+```cpp
+class IntpcLocalPlannerROS : public nav2_core::Controller
+```
+
+**检查点3：必需方法实现**
+```bash
+# 检查是否实现了所有必需的接口方法
+grep -E "(configure|cleanup|activate|deactivate|computeVelocityCommands|setPlan|setSpeedLimit)" src/rm_navigation/Intpc_local_planner/include/intpc_local_planner/intpc_local_planner_ros.h
+```
+
+预期应包含所有七个方法。
+
+#### 配置验证
+
+**检查点4：配置文件设置**
+```bash
+# 查看局部规划器配置（使用Intpc作为局部规划器时）
+cat src/rm_navigation/rm_navigation/params/nav2_params_intpc.yaml | grep -A 20 "controller_server:"
+```
+
+预期输出应包含：
+```yaml
+controller_server:
+  ros__parameters:
+    controller_plugins: ["FollowPath"]
+    FollowPath:
+      plugin: "intpc_local_planner/IntpcLocalPlannerROS"
+```
+
+#### 编译验证
+
+**检查点5：编译成功**
+```bash
+colcon build --packages-select Intpc_local_planner --symlink-install
+```
+
+预期输出：编译成功，无错误。
+
+#### 运行时验证
+
+**检查点6：插件加载**
+```bash
+# 启动导航系统
+ros2 launch rm_nav_bringup bringup_sim.launch.py planner_type:=intpc
+
+# 在另一个终端检查插件是否正确加载
+ros2 param get /controller_server FollowPath/plugin
+```
+
+预期输出：`intpc_local_planner/IntpcLocalPlannerROS`
+
+**检查点7：速度控制功能**
+```bash
+# 发送导航目标
+ros2 action send_goal /navigate_to_pose nav2_msgs/action/NavigateToPose "{pose: {header: {frame_id: 'map'}, pose: {position: {x: 2.0, y: 1.0}, orientation: {w: 1.0}}}}"
+
+# 查看速度命令
+ros2 topic echo /cmd_vel
+```
+
+预期输出：应生成有效的速度命令。
+
+### 8.3 常见问题排查
+
+#### 问题1：插件未正确加载
+
+**症状**：启动时出现插件加载错误
+
+**排查步骤**：
+```bash
+# 1. 检查插件XML文件
+cat src/rm_navigation/Intpc_local_planner/intpc_local_planner_plugin.xml
+
+# 2. 检查CMakeLists.txt中的插件导出
+cat src/rm_navigation/Intpc_local_planner/CMakeLists.txt | grep pluginlib
+
+# 3. 检查编译输出
+colcon build --packages-select Intpc_local_planner --symlink-install
+```
+
+**解决方案**：确保CMakeLists.txt中包含`pluginlib_export_plugin_description_file(nav2_core intpc_local_planner_plugin.xml)`
+
+#### 问题2：路径规划失败
+
+**症状**：无法生成有效路径
+
+**排查步骤**：
+```bash
+# 1. 检查代价地图
+ros2 topic echo /global_costmap/costmap
+
+# 2. 检查起点和终点是否有效
+ros2 topic echo /amcl_pose
+
+# 3. 检查规划器日志
+ros2 topic echo /rosout | grep -i planner
+```
+
+**解决方案**：确保起点和终点不在障碍物内，检查代价地图配置。
+
+#### 问题3：速度命令异常
+
+**症状**：机器人运动异常或不动
+
+**排查步骤**：
+```bash
+# 1. 检查速度命令
+ros2 topic echo /cmd_vel
+
+# 2. 检查规划器参数
+ros2 param dump /controller_server
+
+# 3. 检查障碍物信息
+ros2 topic echo /local_costmap/obstacles
+```
+
+**解决方案**：调整规划器参数（如max_vel_x、k_gain等），检查障碍物检测。
+
+### 8.4 性能监控
+
+#### 监控规划器性能
+
+```bash
+# 查看规划器计算时间
+ros2 topic hz /plan
+
+# 查看速度命令频率
+ros2 topic hz /cmd_vel
+
+# 查看CPU使用情况
+top -p $(pgrep -f planner_server)
+```
+
+#### 性能指标
+
+| 指标 | 全局规划器 | 局部规划器 |
+|------|-----------|-----------|
+| 规划频率 | > 1 Hz | > 10 Hz |
+| 规划时间 | < 1.0 s | < 0.1 s |
+| 路径平滑度 | 良好 | 优秀 |
+| 避障响应 | 中等 | 优秀 |
+
+## 九. 致谢与参考
 
 ### 算法参考
 - IntPC算法思想来源于北航机器人平台相关工作
