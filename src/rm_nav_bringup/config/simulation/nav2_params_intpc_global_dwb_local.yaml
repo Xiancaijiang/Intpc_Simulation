@@ -293,8 +293,8 @@ planner_server:
   ros__parameters:
     expected_planner_frequency: 5.0
     use_sim_time: False
-    planner_plugins: ["IntpcGlobal"]
-    IntpcGlobal:
+    planner_plugins: ["GridBased"]
+    GridBased:
       plugin: "intpc_local_planner::IntpcGlobalPlannerROS"
       tolerance: 0.5
       use_astar: false

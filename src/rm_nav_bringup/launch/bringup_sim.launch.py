@@ -497,8 +497,7 @@ def generate_launch_description():
                 'use_sim_time': use_sim_time,
                 'map': nav2_map_dir,
                 'params_file': os.path.join(rm_nav_bringup_dir, 'config', 'simulation', 'nav2_params_intpc.yaml'),
-                'nav_rviz': use_nav_rviz,
-                'planner_type': 'intpc'}.items()
+                'nav_rviz': use_nav_rviz}.items()
         )
         
       start_navigation2_teb = IncludeLaunchDescription(
@@ -508,8 +507,7 @@ def generate_launch_description():
                 'use_sim_time': use_sim_time,
                 'map': nav2_map_dir,
                 'params_file': os.path.join(rm_nav_bringup_dir, 'config', 'simulation', 'nav2_params_sim.yaml'),
-                'nav_rviz': use_nav_rviz,
-                'planner_type': 'teb'}.items()
+                'nav_rviz': use_nav_rviz}.items()
         )
 
       start_navigation2_intpc_global_dwb_local = IncludeLaunchDescription(
@@ -519,8 +517,7 @@ def generate_launch_description():
                 'use_sim_time': use_sim_time,
                 'map': nav2_map_dir,
                 'params_file': os.path.join(rm_nav_bringup_dir, 'config', 'simulation', 'nav2_params_intpc_global_dwb_local.yaml'),
-                'nav_rviz': use_nav_rviz,
-                'planner_type': 'intpc_global_dwb_local'}.items()
+                'nav_rviz': use_nav_rviz}.items()
         )
 
       ld = LaunchDescription()

@@ -53,6 +53,7 @@ void IntpcGlobalPlannerROS::configure(
   nav2_util::declare_parameter_if_not_declared(node, name_ + ".obstacle_inflation_radius", rclcpp::ParameterValue(0.3));
   nav2_util::declare_parameter_if_not_declared(node, name_ + ".smoothing_factor", rclcpp::ParameterValue(0.5));
   nav2_util::declare_parameter_if_not_declared(node, name_ + ".use_smoother", rclcpp::ParameterValue(true));
+  nav2_util::declare_parameter_if_not_declared(node, name_ + ".use_astar", rclcpp::ParameterValue(false));
   
   node->get_parameter(name_ + ".path_resolution", path_resolution_);
   node->get_parameter(name_ + ".max_planning_time", max_planning_time_);
@@ -60,11 +61,12 @@ void IntpcGlobalPlannerROS::configure(
   node->get_parameter(name_ + ".obstacle_inflation_radius", obstacle_inflation_radius_);
   node->get_parameter(name_ + ".smoothing_factor", smoothing_factor_);
   node->get_parameter(name_ + ".use_smoother", use_smoother_);
+  node->get_parameter(name_ + ".use_astar", use_astar_);
   
   RCLCPP_INFO(logger_, "Intpc global planner parameters: path_resolution=%.2f, max_planning_time=%.2f, waypoint_separation=%.2f", 
               path_resolution_, max_planning_time_, waypoint_separation_);
-  RCLCPP_INFO(logger_, "Obstacle inflation radius: %.2f, Smoothing factor: %.2f, Use smoother: %s", 
-              obstacle_inflation_radius_, smoothing_factor_, use_smoother_ ? "true" : "false");
+  RCLCPP_INFO(logger_, "Obstacle inflation radius: %.2f, Smoothing factor: %.2f, Use smoother: %s, Use A*: %s", 
+              obstacle_inflation_radius_, smoothing_factor_, use_smoother_ ? "true" : "false", use_astar_ ? "true" : "false");
 }
 
 void IntpcGlobalPlannerROS::cleanup()
@@ -419,33 +421,27 @@ nav_msgs::msg::Path IntpcGlobalPlannerROS::createPlan(
   
   planner_->initializePathParams(goal_x, goal_y);
   
-  plan = aStarPlanning(start_x, start_y, goal_x, goal_y);
+  RCLCPP_INFO(logger_, "Using Intpc Fourier path fitting for global planning");
   
-  if (plan.poses.empty()) {
-    RCLCPP_WARN(logger_, "A* planning failed, returning empty path");
-    return plan;
-  }
+  plan.header.frame_id = costmap_ros_->getGlobalFrameID();
   
-  if (use_smoother_) {
-    plan = smoothPath(plan);
-  }
+  double dx = goal_x - start_x;
+  double dy = goal_y - start_y;
+  int harmonic = 10;
   
   std::vector<double> path_x, path_y, theta;
-  for (const auto& pose : plan.poses) {
-    path_x.push_back(pose.pose.position.x);
-    path_y.push_back(pose.pose.position.y);
+  int num_waypoints = 20;
+  for (int i = 0; i < num_waypoints; i++) {
+    double t = static_cast<double>(i) / (num_waypoints - 1);
+    double x = start_x + t * dx;
+    double y = start_y + t * dy;
+    path_x.push_back(x);
+    path_y.push_back(y);
+    theta.push_back(2.0 * M_PI * t);
   }
   
-  for (size_t i = 0; i < plan.poses.size(); i++) {
-    theta.push_back(2.0 * M_PI * i / (plan.poses.size() - 1));
-  }
-  
-  int harmonic = 10;
   std::vector<double> px, py;
   planner_->fourierFit(path_x, path_y, theta, harmonic, px, py);
-  
-  nav_msgs::msg::Path fourier_path;
-  fourier_path.header = plan.header;
   
   for (double t = 0.0; t <= 2.0 * M_PI; t += 0.1) {
     double x, y;
@@ -453,35 +449,49 @@ nav_msgs::msg::Path IntpcGlobalPlannerROS::createPlan(
     
     if (isCollisionFree(x, y)) {
       geometry_msgs::msg::PoseStamped pose;
-      pose.header = fourier_path.header;
+      pose.header = plan.header;
       pose.pose.position.x = x;
       pose.pose.position.y = y;
       pose.pose.position.z = 0.0;
       
-      double dx, dy;
-      planner_->fourierPathPoint(t + 0.01, px, py, dx, dy);
-      double yaw = std::atan2(dy - y, dx - x);
+      double next_x, next_y;
+      planner_->fourierPathPoint(t + 0.01, px, py, next_x, next_y);
+      double yaw = std::atan2(next_y - y, next_x - x);
       
       tf2::Quaternion q;
       q.setRPY(0, 0, yaw);
       pose.pose.orientation = tf2::toMsg(q);
       
-      fourier_path.poses.push_back(pose);
+      plan.poses.push_back(pose);
     }
+  }
+  
+  if (plan.poses.empty()) {
+    RCLCPP_WARN(logger_, "Fourier path planning failed, returning empty path");
+    return plan;
+  }
+  
+  RCLCPP_INFO(logger_, "Fourier path planning successful: %zu waypoints", plan.poses.size());
+  
+  if (use_smoother_) {
+    plan = smoothPath(plan);
   }
   
   std::vector<geometry_msgs::msg::PoseStamped> resampled_poses;
   double accumulated_dist = 0.0;
-  resampled_poses.push_back(fourier_path.poses[0]);
   
-  for (size_t i = 1; i < fourier_path.poses.size(); i++) {
-    double dx = fourier_path.poses[i].pose.position.x - fourier_path.poses[i-1].pose.position.x;
-    double dy = fourier_path.poses[i].pose.position.y - fourier_path.poses[i-1].pose.position.y;
+  if (!plan.poses.empty()) {
+    resampled_poses.push_back(plan.poses[0]);
+  }
+  
+  for (size_t i = 1; i < plan.poses.size(); i++) {
+    double dx = plan.poses[i].pose.position.x - plan.poses[i-1].pose.position.x;
+    double dy = plan.poses[i].pose.position.y - plan.poses[i-1].pose.position.y;
     double dist = std::hypot(dx, dy);
     
     if (accumulated_dist + dist >= waypoint_separation_) {
       double ratio = (waypoint_separation_ - accumulated_dist) / dist;
-      geometry_msgs::msg::PoseStamped new_pose = fourier_path.poses[i-1];
+      geometry_msgs::msg::PoseStamped new_pose = plan.poses[i-1];
       new_pose.pose.position.x += dx * ratio;
       new_pose.pose.position.y += dy * ratio;
       
@@ -497,9 +507,10 @@ nav_msgs::msg::Path IntpcGlobalPlannerROS::createPlan(
     }
   }
   
-  if (resampled_poses.back().pose.position.x != fourier_path.poses.back().pose.position.x ||
-      resampled_poses.back().pose.position.y != fourier_path.poses.back().pose.position.y) {
-    resampled_poses.push_back(fourier_path.poses.back());
+  if (!resampled_poses.empty() && !plan.poses.empty() &&
+      (resampled_poses.back().pose.position.x != plan.poses.back().pose.position.x ||
+       resampled_poses.back().pose.position.y != plan.poses.back().pose.position.y)) {
+    resampled_poses.push_back(plan.poses.back());
   }
   
   plan.poses = resampled_poses;

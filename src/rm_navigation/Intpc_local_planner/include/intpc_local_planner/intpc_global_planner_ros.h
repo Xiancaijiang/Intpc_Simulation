@@ -95,6 +95,7 @@ protected:
   double obstacle_inflation_radius_;
   double smoothing_factor_;
   bool use_smoother_;
+  bool use_astar_;
 
   bool isCollisionFree(double x, double y);
   bool isPathCollisionFree(const std::vector<std::pair<int, int>>& path);
