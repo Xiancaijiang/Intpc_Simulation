@@ -1,5 +1,8 @@
-<library path="libintpc_local_planner_plugin">
+<library path="intpc_local_planner_plugin">
   <class type="intpc_local_planner::IntpcLocalPlannerROS" base_class_type="nav2_core::Controller">
     <description>Intpc Local Planner implements Fourier path representation, proportional-tangential-normal control, CBF, and quadratic programming optimization.</description>
+  </class>
+  <class type="intpc_local_planner::IntpcGlobalPlannerROS" base_class_type="nav2_core::GlobalPlanner">
+    <description>Intpc Global Planner implements path planning functionality with Fourier path representation.</description>
   </class>
 </library>

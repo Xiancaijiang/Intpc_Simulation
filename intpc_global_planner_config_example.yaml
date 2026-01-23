@@ -1,0 +1,102 @@
+# Intpc全局规划器配置示例
+
+# Navigation2规划器服务器配置
+planner_server:
+  ros__parameters:
+    # 设置规划器插件
+    planner_plugins: ["GridBased"]
+    
+    # 默认全局规划器配置（未使用Intpc时）
+    GridBased:
+      plugin: "nav2_navfn_planner/NavfnPlanner"
+      tolerance: 0.5
+      use_astar: false
+      allow_unknown: true
+      
+    # Intpc全局规划器配置（使用Intpc时取消注释）
+    # IntpcGlobalPlanner:
+    #   plugin: "intpc_local_planner::IntpcGlobalPlannerROS"
+    #   path_resolution: 0.1
+    #   max_planning_time: 1.0
+    #   waypoint_separation: 0.5
+
+# 控制器服务器配置（使用默认DWB局部规划器）
+controller_server:
+  ros__parameters:
+    controller_plugins: ["FollowPath"]
+    
+    FollowPath:
+      plugin: "dwb_core::DWBLocalPlanner"
+      debug_trajectory_details: False
+      min_vel_x: -2.5
+      min_vel_y: -2.5
+      max_vel_x: 2.5
+      max_vel_y: 2.5
+      max_vel_theta: 12.0
+      min_speed_xy: -8.0
+      max_speed_xy: 8.0
+      min_speed_theta: -12.0
+      acc_lim_x: 5.0
+      acc_lim_y: 5.0
+      acc_lim_theta: 15.0
+      decel_lim_x: -5.0
+      decel_lim_y: -5.0
+      decel_lim_theta: -15.0
+      vx_samples: 20
+      vy_samples: 20
+      vtheta_samples: 20
+      sim_time: 0.51
+      linear_granularity: 0.05
+      angular_granularity: 0.025
+      transform_tolerance: 0.2
+      xy_goal_tolerance: 0.25
+      trans_stopped_velocity: 0.25
+      short_circuit_trajectory_evaluation: True
+      stateful: True
+      critics: ["RotateToGoal", "Oscillation", "BaseObstacle", "GoalAlign", "PathAlign", "PathDist", "GoalDist"]
+      BaseObstacle.scale: 0.02
+      PathAlign.scale: 32.0
+      PathAlign.forward_point_distance: 0.1
+      GoalAlign.scale: 24.0
+      GoalAlign.forward_point_distance: 0.1
+      PathDist.scale: 32.0
+      GoalDist.scale: 24.0
+      RotateToGoal.scale: 32.0
+      RotateToGoal.slowing_factor: 5.0
+      RotateToGoal.lookahead_time: -1.0
+
+# 局部代价地图配置
+local_costmap:
+  local_costmap:
+    ros__parameters:
+      update_frequency: 20.0
+      publish_frequency: 20.0
+      width: 3.0
+      height: 3.0
+      resolution: 0.05
+      robot_base_frame: "base_link"
+      global_frame: "odom"
+      rolling_window: true
+      plugins:
+        - name: voxel2d_layer
+          type: "nav2_costmap_2d::VoxelLayer"
+        - name: inflation_layer
+          type: "nav2_costmap_2d::InflationLayer"
+
+# 全局代价地图配置
+global_costmap:
+  global_costmap:
+    ros__parameters:
+      update_frequency: 5.0
+      publish_frequency: 5.0
+      width: 100.0
+      height: 100.0
+      resolution: 0.1
+      robot_base_frame: "base_link"
+      global_frame: "map"
+      rolling_window: false
+      plugins:
+        - name: voxel2d_layer
+          type: "nav2_costmap_2d::VoxelLayer"
+        - name: inflation_layer
+          type: "nav2_costmap_2d::InflationLayer"

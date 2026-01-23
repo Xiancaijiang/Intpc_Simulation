@@ -6,7 +6,7 @@ from ament_index_python.packages import get_package_share_directory, get_package
 
 from launch import LaunchDescription
 from launch.substitutions import LaunchConfiguration, Command
-from launch.actions import IncludeLaunchDescription, DeclareLaunchArgument, GroupAction
+from launch.actions import IncludeLaunchDescription, DeclareLaunchArgument, GroupAction, TimerAction
 from launch.launch_description_sources import PythonLaunchDescriptionSource
 from launch_ros.actions import Node
 from launch.conditions import LaunchConfigurationEquals
@@ -125,21 +125,27 @@ def generate_launch_description():
         return GroupAction(
             condition=LaunchConfigurationEquals('world', world_type),
             actions=[
-                Node(
-                    package='gazebo_ros',
-                    executable='spawn_entity.py',
-                    arguments=[
-                        '-entity', 'robot',
-                        '-topic', 'robot_description',
-                        '-x', world_config['x'],
-                        '-y', world_config['y'],
-                        '-z', world_config['z'],
-                        '-Y', world_config['yaw']
-                    ],
-                ),
                 IncludeLaunchDescription(
                     PythonLaunchDescriptionSource(os.path.join(pkg_gazebo_ros, 'launch', 'gzserver.launch.py')),
                     launch_arguments={'world': os.path.join(bringup_dir, 'world', world_config['world_path'])}.items(),
+                ),
+                TimerAction(
+                    period=10.0,
+                    actions=[
+                        Node(
+                            package='gazebo_ros',
+                            executable='spawn_entity.py',
+                            arguments=[
+                                '-entity', 'robot',
+                                '-topic', 'robot_description',
+                                '-x', world_config['x'],
+                                '-y', world_config['y'],
+                                '-z', world_config['z'],
+                                '-Y', world_config['yaw'],
+                                '-timeout', '30.0'
+                            ],
+                        ),
+                    ]
                 )
             ]
         )

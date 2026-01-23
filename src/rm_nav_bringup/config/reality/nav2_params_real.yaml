@@ -109,7 +109,7 @@ controller_server:
       xy_goal_tolerance: 0.25
       yaw_goal_tolerance: 6.28
     FollowPath:
-      plugin: teb_local_planner::TebLocalPlannerROS
+      plugin: "dwb_core::DWBLocalPlanner"
       # https://github.com/rst-tu-dortmund/teb_local_planner/tree/ros2-master
 
       #*******************************************************************************

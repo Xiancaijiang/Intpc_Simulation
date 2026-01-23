@@ -39,7 +39,6 @@ def generate_launch_description():
     container_name_full = (namespace, '/', container_name)
     use_respawn = LaunchConfiguration('use_respawn')
     log_level = LaunchConfiguration('log_level')
-    planner_type = LaunchConfiguration('planner_type', default='teb')
 
     lifecycle_nodes = ['controller_server',
                        'smoother_server',
@@ -109,11 +108,6 @@ def generate_launch_description():
     declare_log_level_cmd = DeclareLaunchArgument(
         'log_level', default_value='info',
         description='log level')
-        
-    declare_planner_type_cmd = DeclareLaunchArgument(
-        'planner_type', 
-        default_value='teb',
-        description='Planner type to use: teb or intpc')
 
     load_nodes = GroupAction(
         condition=IfCondition(PythonExpression(['not ', use_composition])),
@@ -273,7 +267,6 @@ def generate_launch_description():
     ld.add_action(declare_use_respawn_cmd)
     ld.add_action(declare_log_level_cmd)
     # Add the actions to launch all of the navigation nodes
-    ld.add_action(declare_planner_type_cmd)
     ld.add_action(load_nodes)
     ld.add_action(load_composable_nodes)
 
