@@ -63,7 +63,7 @@ c
 | `localization` | `slam_toolbox`/`amcl`/`icp` | 定位算法（仅`mode:=nav`有效） |
 | `lio_rviz` | `True`/`False` | 是否可视化LiDAR点云 |
 | `nav_rviz` | `True`/`False` | 是否可视化导航信息 |
-| `planner_type` | `dwb`/`teb`/`intpc`/`intpc_global_dwb_local` | 规划器配置选择<br>`dwb`：全局NavfnPlanner + 局部DWB<br>`teb`：全局NavfnPlanner + 局部TEB<br>`intpc`：全局NavfnPlanner + 局部Intpc<br>`intpc_global_dwb_local`：全局Intpc + 局部DWB（默认） |
+| `planner_type` | `dwb`/`teb`/`intpc`/`intpc_global_dwb_local`/`<planner_config>` | 规划器配置选择<br>`dwb`：全局NavfnPlanner + 局部DWB<br>`teb`：全局NavfnPlanner + 局部TEB<br>`intpc`：全局NavfnPlanner + 局部Intpc<br>`intpc_global_dwb_local`：全局Intpc + 局部DWB（默认）<br>`<planner_config>`：自定义规划器配置 |
 
 ### 定位算法说明
 
@@ -178,56 +178,429 @@ ros2 run teleop_twist_keyboard teleop_twist_keyboard
 ./save_grid_map.sh
 ```
 
-## 四. 扩展新的局部规划器
+## 四. 规划器构建与集成指南
 
-本项目支持轻松集成自定义局部规划器，只需遵循以下步骤：
+本项目支持将自定义规划器作为算法可选项集成到系统中，包括全局规划器和局部规划器。
 
-### 1. 准备规划器代码
-将规划器代码添加到 `src/rm_navigation/` 目录，确保实现 Nav2 局部规划器接口。
+### 4.1 规划器架构概览
 
-### 2. 创建配置文件
-在 `src/rm_navigation/rm_navigation/config/` 目录创建 `nav2_params_<planner_name>.yaml` 配置文件，示例：
+系统采用 Navigation2 插件架构，支持以下规划器类型：
+
+| 规划器类型 | 角色 | 实现位置 | 核心算法 |
+|-----------|------|----------|----------|
+| NavfnPlanner | 全局规划器 | Nav2 默认 | Dijkstra 算法 |
+| IntpcGlobalPlanner | 全局规划器 | `Intpc_local_planner` 包 | 傅里叶路径表示 + CBF 优化 |
+| DWB | 局部规划器 | Nav2 默认 | 动态窗口法 |
+| TEB | 局部规划器 | `teb_local_planner` 包 | 时间弹性带算法 |
+| IntpcLocalPlanner | 局部规划器 | `Intpc_local_planner` 包 | 傅里叶路径表示 + CBF 优化 |
+
+### 4.2 构建自定义规划器
+
+#### 步骤1：创建规划器包结构
+
+```bash
+# 在 src/rm_navigation/ 目录下创建规划器包
+cd src/rm_navigation/
+ros2 pkg create --build-type ament_cmake <your_planner_package>
+```
+
+#### 步骤2：实现规划器接口
+
+创建以下文件结构：
+
+```
+<your_planner_package>/
+├── include/
+│   └── <your_planner_package>/
+│       ├── <your_global_planner>.h  # 全局规划器接口（可选）
+│       └── <your_local_planner>.h   # 局部规划器接口（可选）
+├── src/
+│   ├── <your_global_planner>.cpp    # 全局规划器实现（可选）
+│   └── <your_local_planner>.cpp     # 局部规划器实现（可选）
+├── <your_planner_package>_plugin.xml  # 插件注册文件
+├── CMakeLists.txt
+├── package.xml
+└── README.md
+```
+
+#### 步骤3：实现规划器核心功能
+
+**全局规划器接口**：
+
+```cpp
+class <YourGlobalPlanner> : public nav2_core::GlobalPlanner {
+public:
+  void configure(const rclcpp_lifecycle::LifecycleNode::WeakPtr &parent,
+                 std::string name,
+                 const std::shared_ptr<tf2_ros::Buffer> &tf,
+                 const std::shared_ptr<nav2_costmap_2d::Costmap2DROS> &costmap_ros) override;
+  
+  void cleanup() override;
+  void activate() override;
+  void deactivate() override;
+  
+  nav_msgs::msg::Path createPlan(const geometry_msgs::msg::PoseStamped &start,
+                                const geometry_msgs::msg::PoseStamped &goal) override;
+};
+```
+
+**局部规划器接口**：
+
+```cpp
+class <YourLocalPlanner> : public nav2_core::Controller {
+public:
+  void configure(const rclcpp_lifecycle::LifecycleNode::WeakPtr &parent,
+                 std::string name,
+                 const std::shared_ptr<tf2_ros::Buffer> &tf,
+                 const std::shared_ptr<nav2_costmap_2d::Costmap2DROS> &costmap_ros) override;
+  
+  void cleanup() override;
+  void activate() override;
+  void deactivate() override;
+  
+  geometry_msgs::msg::TwistStamped computeVelocityCommands(const geometry_msgs::msg::PoseStamped &pose,
+                                                           const geometry_msgs::msg::Twist &velocity,
+                                                           nav2_core::GoalChecker *goal_checker) override;
+  
+  void setPlan(const nav_msgs::msg::Path &path) override;
+  void setSpeedLimit(const double &speed_limit, const bool &percentage) override;
+};
+```
+
+#### 步骤4：注册插件
+
+创建 `<your_planner_package>_plugin.xml` 文件：
+
+```xml
+<library path="<your_planner_package>_plugin">
+  <!-- 全局规划器插件（可选） -->
+  <class type="<your_planner_package>::<YourGlobalPlanner>" base_class_type="nav2_core::GlobalPlanner">
+    <description>Your Global Planner Description</description>
+  </class>
+  
+  <!-- 局部规划器插件（可选） -->
+  <class type="<your_planner_package>::<YourLocalPlanner>" base_class_type="nav2_core::Controller">
+    <description>Your Local Planner Description</description>
+  </class>
+</library>
+```
+
+#### 步骤5：配置 CMakeLists.txt
+
+```cmake
+cmake_minimum_required(VERSION 3.8)
+project(<your_planner_package>)
+
+if(CMAKE_COMPILER_IS_GNUCXX OR CMAKE_CXX_COMPILER_ID MATCHES "Clang")
+  add_compile_options(-Wall -Wextra -Wpedantic)
+endif()
+
+find_package(ament_cmake REQUIRED)
+find_package(rclcpp REQUIRED)
+find_package(rclcpp_lifecycle REQUIRED)
+find_package(nav2_core REQUIRED)
+find_package(nav2_costmap_2d REQUIRED)
+find_package(pluginlib REQUIRED)
+find_package(geometry_msgs REQUIRED)
+find_package(nav_msgs REQUIRED)
+find_package(tf2 REQUIRED)
+find_package(tf2_ros REQUIRED)
+
+include_directories(include)
+
+# 构建插件库
+add_library(${PROJECT_NAME}_plugin SHARED
+  src/<your_global_planner>.cpp  # 全局规划器实现（可选）
+  src/<your_local_planner>.cpp   # 局部规划器实现（可选）
+)
+
+ament_target_dependencies(${PROJECT_NAME}_plugin
+  rclcpp
+  rclcpp_lifecycle
+  nav2_core
+  nav2_costmap_2d
+  pluginlib
+  geometry_msgs
+  nav_msgs
+  tf2
+  tf2_ros
+)
+
+# 导出插件
+target_compile_definitions(${PROJECT_NAME}_plugin PRIVATE "PLUGINLIB__DISABLE_BOOST_FUNCTIONS")
+pluginlib_export_plugin_description_file(nav2_core <your_planner_package>_plugin.xml)
+
+install(TARGETS ${PROJECT_NAME}_plugin
+  ARCHIVE DESTINATION lib
+  LIBRARY DESTINATION lib
+  RUNTIME DESTINATION bin
+)
+
+install(DIRECTORY include/${PROJECT_NAME}/
+  DESTINATION include/${PROJECT_NAME}/
+)
+
+install(FILES <your_planner_package>_plugin.xml
+  DESTINATION share/${PROJECT_NAME}/
+)
+
+ament_package()
+```
+
+#### 步骤6：配置 package.xml
+
+```xml
+<?xml version="1.0"?>
+<?xml-model href="http://download.ros.org/schema/package_format3.xsd" schematypens="http://www.w3.org/2001/XMLSchema"?>
+<package format="3">
+  <name><your_planner_package></name>
+  <version>0.0.0</version>
+  <description>Your Planner Package Description</description>
+  <maintainer email="you@example.com">Your Name</maintainer>
+  <license>Apache License 2.0</license>
+
+  <buildtool_depend>ament_cmake</buildtool_depend>
+
+  <build_depend>rclcpp</build_depend>
+  <build_depend>rclcpp_lifecycle</build_depend>
+  <build_depend>nav2_core</build_depend>
+  <build_depend>nav2_costmap_2d</build_depend>
+  <build_depend>pluginlib</build_depend>
+  <build_depend>geometry_msgs</build_depend>
+  <build_depend>nav_msgs</build_depend>
+  <build_depend>tf2</build_depend>
+  <build_depend>tf2_ros</build_depend>
+
+  <exec_depend>rclcpp</exec_depend>
+  <exec_depend>rclcpp_lifecycle</exec_depend>
+  <exec_depend>nav2_core</exec_depend>
+  <exec_depend>nav2_costmap_2d</exec_depend>
+  <exec_depend>pluginlib</exec_depend>
+  <exec_depend>geometry_msgs</exec_depend>
+  <exec_depend>nav_msgs</exec_depend>
+  <exec_depend>tf2</exec_depend>
+  <exec_depend>tf2_ros</exec_depend>
+
+  <export>
+    <build_type>ament_cmake</build_type>
+  </export>
+</package>
+```
+
+### 4.3 集成规划器到系统
+
+#### 步骤1：创建配置文件
+
+在 `src/rm_nav_bringup/config/simulation/` 目录创建 `nav2_params_<planner_config>.yaml` 配置文件，示例：
+
+**全局规划器配置**：
 
 ```yaml
-controller_server:
+planner_server:
   ros__parameters:
-    controller_plugins:
-      - FollowPath
-    FollowPath:
-      plugin: <your_planner_package>/<your_planner_class>
-      # 规划器特定参数
+    expected_planner_frequency: 5.0
+    use_sim_time: False
+    planner_plugins: ["GridBased"]
+    GridBased:
+      plugin: "<your_planner_package>/<YourGlobalPlanner>"
+      # 全局规划器特定参数
       param1: value1
       param2: value2
 ```
 
-### 3. 修改启动文件
-编辑 `src/rm_navigation/rm_navigation/launch/navigation_launch.py`：
+**局部规划器配置**：
 
-1. 添加规划器类型参数选项：
+```yaml
+controller_server:
+  ros__parameters:
+    use_sim_time: False
+    controller_frequency: 20.0
+    min_x_velocity_threshold: 0.001
+    min_y_velocity_threshold: 0.5
+    min_theta_velocity_threshold: 0.001
+    controller_plugins: ["FollowPath"]
+    FollowPath:
+      plugin: "<your_planner_package>/<YourLocalPlanner>"
+      # 局部规划器特定参数
+      param1: value1
+      param2: value2
+```
+
+#### 步骤2：修改启动文件
+
+编辑 `src/rm_nav_bringup/launch/bringup_sim.launch.py`，添加新的规划器配置选项：
+
 ```python
-declare_planner_type_cmd = DeclareLaunchArgument(
-    'planner_type',
-    default_value='teb',
-    description='Choose local planner: teb, intpc or <your_planner_name>')
+start_navigation2_<planner_config> = IncludeLaunchDescription(
+    PythonLaunchDescriptionSource(os.path.join(navigation2_launch_dir, 'bringup_rm_navigation.py')),
+    condition=LaunchConfigurationEquals('planner_type', '<planner_config>'),
+    launch_arguments={
+        'use_sim_time': use_sim_time,
+        'map': nav2_map_dir,
+        'params_file': os.path.join(rm_nav_bringup_dir, 'config', 'simulation', 'nav2_params_<planner_config>.yaml'),
+        'nav_rviz': use_nav_rviz}.items()
+)
 ```
 
-2. 添加配置文件选择逻辑：
-```python
-elif planner_type == '<your_planner_name>':
-    params_file = os.path.join(
-        get_package_share_directory('rm_navigation'),
-        'config',
-        'nav2_params_<your_planner_name>.yaml')
+#### 步骤3：更新参数说明
+
+在 README.md 的参数说明部分添加新规划器配置：
+
+```markdown
+| `planner_type` | `dwb`/`teb`/`intpc`/`intpc_global_dwb_local`/`<planner_config>` | 规划器配置选择 |
 ```
 
-### 4. 更新文档
-在 README.md 的参数说明部分添加新规划器的介绍。
+### 4.4 构建与测试
 
-### 5. 编译测试
-```sh
-colcon build --symlink-install
-ros2 launch rm_nav_bringup bringup_sim.launch.py planner_type:=<your_planner_name>
+#### 步骤1：编译项目
+
+```bash
+cd Intpc_Simulation
+colcon build --symlink-install --packages-select <your_planner_package>
 ```
+
+#### 步骤2：测试规划器
+
+```bash
+source install/setup.bash
+ros2 launch rm_nav_bringup bringup_sim.launch.py planner_type:=<planner_config>
+```
+
+#### 步骤3：验证插件加载
+
+```bash
+# 检查全局规划器插件（如果实现了）
+ros2 param get /planner_server GridBased/plugin
+
+# 检查局部规划器插件（如果实现了）
+ros2 param get /controller_server FollowPath/plugin
+```
+
+#### 步骤4：测试路径规划
+
+```bash
+# 发送导航目标
+ros2 action send_goal /navigate_to_pose nav2_msgs/action/NavigateToPose "{pose: {header: {frame_id: 'map'}, pose: {position: {x: 2.0, y: 1.0}, orientation: {w: 1.0}}}}"
+
+# 查看规划结果
+ros2 topic echo /plan
+
+# 查看速度命令
+ros2 topic echo /cmd_vel
+```
+
+### 4.5 规划器性能调优
+
+#### 全局规划器调优
+
+| 参数 | 说明 | 建议值 |
+|------|------|--------|
+| `expected_planner_frequency` | 规划器期望频率 | 1.0-5.0 Hz |
+| `tolerance` | 目标点容差 | 0.1-0.5 m |
+| `allow_unknown` | 是否允许未知区域 | true/false |
+
+#### 局部规划器调优
+
+| 参数 | 说明 | 建议值 |
+|------|------|--------|
+| `controller_frequency` | 控制器频率 | 10.0-30.0 Hz |
+| `max_vel_x` | 最大线速度 | 0.5-2.0 m/s |
+| `max_vel_theta` | 最大角速度 | 1.0-3.0 rad/s |
+| `min_vel_x` | 最小线速度 | 0.0-0.1 m/s |
+| `min_vel_theta` | 最小角速度 | -3.0-3.0 rad/s |
+| `acc_lim_x` | 线加速度限制 | 0.5-2.0 m/s² |
+| `acc_lim_theta` | 角加速度限制 | 1.0-5.0 rad/s² |
+
+### 4.6 示例：集成Intpc规划器
+
+Intpc规划器提供了全局和局部规划能力，详细实现和配置信息请参考 **Intpc规划器实现文档** (`src/rm_navigation/Intpc_local_planner/README.md`)。
+
+**核心特性**：
+- **Intpc全局规划器**：使用傅里叶路径表示，生成平滑路径，集成CBF优化实现安全避障
+- **Intpc局部规划器**：基于比例-切向-法向控制，实现高精度轨迹跟踪和动态避障
+
+**配置示例**：
+- 全局规划器配置：使用 `intpc_local_planner/IntpcGlobalPlannerROS` 插件
+- 局部规划器配置：使用 `intpc_local_planner/IntpcLocalPlannerROS` 插件
+
+详细的参数配置、算法原理和实现细节请查阅 Intpc 规划器实现文档。
+
+### 4.7 规划器选择指南
+
+| 场景 | 推荐规划器配置 | 优势 |
+|------|---------------|------|
+| 简单环境，快速部署 | `dwb`（全局NavfnPlanner + 局部DWB） | 配置简单，可靠性高 |
+| 复杂环境，动态避障 | `teb`（全局NavfnPlanner + 局部TEB） | 避障能力强，轨迹平滑 |
+| 高精度轨迹跟踪 | `intpc`（全局NavfnPlanner + 局部Intpc） | 跟踪精度高，控制平稳 |
+| 全局路径优化 | `intpc_global_dwb_local`（全局Intpc + 局部DWB） | 全局路径平滑，局部反应迅速 |
+| 自定义需求 | 自定义规划器配置 | 完全满足特定场景需求 |
+
+### 4.8 常见问题排查
+
+#### 插件加载失败
+
+**症状**：启动时出现 "Failed to create planner" 错误
+
+**解决方案**：
+1. 检查插件XML文件路径和内容是否正确
+2. 确保CMakeLists.txt中正确导出插件
+3. 验证编译是否成功，无错误
+4. 检查环境变量是否正确设置：`source install/setup.bash`
+
+#### 规划器参数无效
+
+**症状**：规划器行为不符合预期
+
+**解决方案**：
+1. 检查配置文件格式是否正确
+2. 验证参数名称是否与规划器实现匹配
+3. 使用 `ros2 param dump` 查看当前参数值
+4. 调整参数值，重启导航系统测试
+
+#### 路径规划失败
+
+**症状**：无法生成有效路径或路径穿越障碍物
+
+**解决方案**：
+1. 检查代价地图是否正确生成：`ros2 topic echo /global_costmap/costmap`
+2. 验证起点和终点是否在可行区域内
+3. 调整规划器参数，如增加障碍物膨胀半径
+4. 检查传感器数据是否正确传入代价地图
+
+### 4.9 性能监控与分析
+
+#### 监控规划器性能
+
+```bash
+# 查看规划器计算时间
+ros2 topic hz /plan
+
+# 查看速度命令频率
+ros2 topic hz /cmd_vel
+
+# 查看CPU使用情况
+top -p $(pgrep -f planner_server) $(pgrep -f controller_server)
+
+# 查看内存使用情况
+ps aux | grep -E "planner_server|controller_server" | awk '{print $4, $11}'
+```
+
+#### 性能优化建议
+
+1. **全局规划器**：
+   - 降低规划频率（expected_planner_frequency）
+   - 增加规划容差（tolerance）
+   - 使用更简单的路径表示方法
+
+2. **局部规划器**：
+   - 调整控制器频率（controller_frequency）
+   - 优化障碍物检测和避障算法
+   - 使用更高效的优化方法（如快速QP求解器）
+
+3. **系统级优化**：
+   - 使用Release模式编译：`colcon build --cmake-args -DCMAKE_BUILD_TYPE=Release`
+   - 关闭不必要的日志输出
+   - 优化代价地图更新频率和分辨率
 
 ## 五. 实车适配指南
 
