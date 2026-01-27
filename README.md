@@ -22,14 +22,14 @@
 ### 安装步骤
 
 1. **克隆仓库（包含子模块）**
-    ```sh
-    # 方法1：直接克隆时包含子模块（推荐）
+    
+    方法1：直接克隆时包含子模块（推荐）
     ```sh
     git clone --recursive https://github.com/Xiancaijiang/Intpc_local_planner.git
     cd Intpc_local_planner
     ```
 
-    # 方法2：先克隆主仓库，然后初始化子模块
+    方法2：先克隆主仓库，然后初始化子模块
     ```sh
     git clone https://github.com/Xiancaijiang/Intpc_local_planner.git
     cd Intpc_local_planner
