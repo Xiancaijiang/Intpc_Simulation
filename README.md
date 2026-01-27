@@ -24,9 +24,13 @@
 1. **克隆仓库（包含子模块）**
     ```sh
     # 方法1：直接克隆时包含子模块（推荐）
-c
+    ```sh
+    git clone --recursive https://github.com/Xiancaijiang/Intpc_local_planner.git
+    cd Intpc_local_planner
+    ```
 
     # 方法2：先克隆主仓库，然后初始化子模块
+    ```sh
     git clone https://github.com/Xiancaijiang/Intpc_local_planner.git
     cd Intpc_local_planner
     git submodule update --init --recursive
@@ -42,7 +46,6 @@ c
 
 3. **安装项目依赖**
     ```sh
-    cd Intpc_local_planner
     rosdep install -r --from-paths src --ignore-src --rosdistro $ROS_DISTRO -y
     ```
 
@@ -195,42 +198,7 @@ ros2 run teleop_twist_keyboard teleop_twist_keyboard
 
 Intpc规划器采用模块化设计架构，同时支持全局和局部规划功能：
 
-```
-Intpc规划器架构
-┌─────────────────────────────────────────────────────────────┐
-│                 Navigation2 框架                            │
-├─────────────────────┬───────────────────────────────────────┤
-│                     │                                       │
-▼                     ▼                                       │
-┌─────────────────┐  ┌─────────────────┐                     │
-│ 全局规划器接口  │  │ 局部规划器接口  │                     │
-│ (GlobalPlanner) │  │  (Controller)   │                     │
-└────────┬────────┘  └────────┬────────┘                     │
-         │                    │                              │
-         ▼                    ▼                              │
-┌─────────────────┐  ┌─────────────────┐                     │
-│ IntpcGlobalPlanner││ IntpcLocalPlanner│                    │
-│   ROS接口层     │  │   ROS接口层     │                     │
-└────────┬────────┘  └────────┬────────┘                     │
-         │                    │                              │
-         ▼                    ▼                              │
-┌─────────────────┐  ┌─────────────────┐                     │
-│  核心规划算法   │  │  核心控制算法   │                     │
-│  (Fourier + CBF)│  │ (P-T-N控制)     │                     │
-└────────┬────────┘  └────────┬────────┘                     │
-         │                    │                              │
-         ▼                    ▼                              │
-┌─────────────────┐  ┌─────────────────┐                     │
-│  路径生成模块   │  │  速度控制模块   │                     │
-└────────┬────────┘  └────────┬────────┘                     │
-         │                    │                              │
-         └────────┬───────────┘                              │
-                  │                                           │
-                  ▼                                           │
-┌─────────────────────────────────────────────────────────────┐
-│                  代价地图与障碍物检测                       │
-└─────────────────────────────────────────────────────────────┘
-```
+![Intpc规划器架构图](.docs/Intpc规划器架构图.png)
 
 **模块说明**：
 - **全局规划器**：使用傅里叶路径表示和CBF优化，生成平滑全局路径
@@ -300,9 +268,9 @@ Intpc规划器是本项目的核心规划器，同时提供全局和局部规划
 └── LICENSE                # 许可证
 ```
 
-## 八. 自检机制
+## 七. 自检机制
 
-### 8.1 规划器自检
+### 7.1 规划器自检
 
 **详细的自检机制**：请参考 **Intpc规划器实现文档** (`src/rm_navigation/Intpc_local_planner/README.md`) 中的自检章节，包含：
 - 插件注册验证
@@ -323,7 +291,7 @@ colcon build --packages-select Intpc_local_planner --symlink-install
 ros2 launch rm_nav_bringup bringup_sim.launch.py planner_type:=intpc_global_dwb_local
 ```
 
-## 九. 致谢与参考
+## 八. 致谢与参考
 
 ### 算法参考
 - IntPC算法思想来源于北航机器人平台相关工作
