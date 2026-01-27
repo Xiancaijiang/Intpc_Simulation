@@ -29,7 +29,7 @@
     cd Intpc_local_planner
     ```
 
-    # 方法2：先克隆主仓库，然后初始化子模块
+    方法2：先克隆主仓库，然后初始化子模块
     ```sh
     git clone https://github.com/Xiancaijiang/Intpc_local_planner.git
     cd Intpc_local_planner
